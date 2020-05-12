@@ -1,0 +1,17 @@
+---
+title: "01-Test"
+author: "lucaraess"
+date: "2020-05-12"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Introduction
+
+```{r}
+source("./code/auxiliary.R")
+
+test_function("Hello World")
+```
+
