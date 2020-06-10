@@ -1,0 +1,152 @@
+---
+title: "01-Data Import"
+author: "lucaraess"
+date: "2020-05-12"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data import
+```{r}
+#Normally not necessary if you work with a project (it is just because this data is from somewhere else)
+setwd("C:/Users/lucar/Github/")
+
+cells <- read.csv(file = "./ImcSegmentationPipeline/output/cpout/cell.csv", stringsAsFactors = FALSE)
+
+image <- read.csv(file = "./ImcSegmentationPipeline/output/cpout/Image.csv", stringsAsFactors = FALSE)
+
+relationships <- read.csv(file = "./ImcSegmentationPipeline/output/cpout/Object relationships.csv")
+
+#panel <- read.csv(file = , stringsAsFactors = FALSE)
+
+```
+
+## Data cleaning
+Overview of the acquired features
+```{r}
+unique( sub("_c[0-9]*$", "", colnames(cells)) )
+```
+
+Extract the desired data columns by name
+```{r}
+cur_counts <- cells[,grepl("Intensity_MeanIntensity_FullStackFiltered",
+colnames(cells))]
+```
+Rescale image intensities
+```{r}
+cur_counts <- cur_counts * image$Scaling_FullStack[1]
+```
+
+## Cell-specific metadata
+```{r}
+library(S4Vectors)
+cell_meta <- DataFrame(CellNumber = cells$ObjectNumber,
+                       Center_X = cells$Location_Center_X,
+                       Center_Y = cells$Location_Center_Y)
+```
+
+## Image-specific metadata
+Overview acquired features
+```{r}
+colnames(image)[grepl("Metadata_", colnames(image))]
+```
+
+```{r}
+library(stringr)
+
+image$Metadata_acname
+image$Metadata_roiid
+```
+
+Add cell number information to cell_metadata
+```{r}
+cell_meta$ImageNumber <- cells$ImageNumber
+```
+
+Split acquisition information
+```{r}
+ac_info <- str_split(image$Metadata_acname, "_", simplify = TRUE) 
+cell_meta$BatchId <- ac_info[cell_meta$ImageNumber,2] 
+cell_meta$SampleId <- ac_info[cell_meta$ImageNumber,3]
+cell_meta$ROI <- image$Metadata_roiid[cell_meta$ImageNumber]
+```
+
+Define row names
+```{r}
+rownames(cell_meta) <- paste(cell_meta$SampleId, cell_meta$ROI, cell_meta$CellNumber, sep = "_")
+```
+
+## Load Feature-specific metadata
+Note: All _full.csv contain the same information
+```{r}
+channel_mass <- read.csv("./ImcSegmentationPipeline/output/tiffs/20170906_FluidigmONfinal_SE_s0_p4_r5_a5_ac_full.csv",
+header = FALSE)
+```
+
+Order pannel by isotope
+```{r}
+#panel information for this analysis not available
+# library(DT) 
+# DT::datatable(panel)
+# panel <- panel[match(channel_mass[,1], panel$Metal.Tag),]
+```
+Change rownames to protein id
+```{r}
+# rownames(panel) <- panel$Target
+```
+Re-order column names in cur_counts to match panel info
+```{r}
+# channelNumber <- as.numeric(sub("^.*_c", "", colnames(cur_counts)))
+# cur_counts <- cur_counts[,order(channelNumber, decreasing = FALSE)]
+```
+
+```{r}
+library(igraph) 
+# Construct neighbour data.frame 
+# First in the ImageNumber_ObjectNumber format
+cur_df <- data.frame(CellID_1 = paste0(relationships$First.Image.Number, "_", relationships$First.Object.Number),
+CellID_2 = paste0(relationships$Second.Image.Number, "_", relationships$Second.Object.Number))
+
+# Create simple cell IDs 
+cellID <- paste0(cell_meta$ImageNumber, "_", cell_meta$CellNumber)
+
+# Change cell IDs
+cur_df$CellID_1 <- rownames(cell_meta)[match(cur_df$CellID_1, cellID)]
+
+cur_df$CellID_2 <- rownames(cell_meta)[match(cur_df$CellID_2, cellID)] 
+
+# Build graph 
+g <- graph_from_data_frame(cur_df)
+g
+```
+
+Create SingleCellExperiment
+```{r}
+library(SingleCellExperiment)
+
+# Create SCE object 
+sce <- SingleCellExperiment(assays = list(counts = t(cur_counts)))
+
+# Set marker name as rownames and cellID as colnames
+# rownames(sce) <- rownames(panel)
+colnames(sce) <- rownames(cell_meta)
+
+colData(sce) <- cell_meta 
+rowData(sce) <- panel 
+metadata(sce) <- list(graph = g)
+sce
+```
+
+## Save SCE object
+
+```{r}
+#doesnt work at the moment (probably working directory confusion)
+# saveRDS(sce, file = "./data")
+```
+
+
